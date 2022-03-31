@@ -8,6 +8,7 @@ namespace PrimativeAutoWirer;
 use PrimativeAutoWirer\Exceptions\AutowireException;
 use ReflectionClass;
 use ReflectionException;
+use ReflectionMethod;
 use ReflectionParameter;
 
 class AutoWire
@@ -18,6 +19,10 @@ class AutoWire
      */
     public function autoWire(string $class): ?object
     {
+        if (!class_exists($class)) {
+            throw new AutowireException("Class $class does not exist");
+        }
+
         $reflection = $this->getReflection($class);
         $reflectionConstructor = $reflection->getConstructor();
 
@@ -29,28 +34,7 @@ class AutoWire
         /**
          * @var ReflectionParameter[] $constructorParams
          */
-        $constructorParams = [];
-
-        // Iterate through any constructor parameters
-        foreach ($reflectionConstructor->getParameters() as $reflectionConstructorParam) {
-            // We can autowire class dependencies by looking at their types
-            $paramTypeReflection = $reflectionConstructorParam->getType();
-
-            // If the constructor param has no type, we can't autowire it
-            if (!$paramTypeReflection) {
-                throw new AutowireException("Class '$class' constructor param '" .
-                    $reflectionConstructorParam->getName() .
-                    "' type - unable to autowire");
-            }
-            // Create a reflection of the dependency
-            $paramReflection = $this->getReflection($paramTypeReflection->getName());
-            // Grab the dependencies constructor
-            $paramReflectionConstructor = $paramReflection->getConstructor();
-
-            // If the dependency has a constructor run it through autoWire()
-            // Otherwise create an instance directly
-            $constructorParams[] = $paramReflectionConstructor ? $this->autoWire($paramTypeReflection->getName()) : $paramReflection->newInstance();
-        }
+        $constructorParams = $this->loadConstructorParams($reflectionConstructor);
 
         return $reflection->newInstanceArgs($constructorParams);
     }
@@ -76,5 +60,44 @@ class AutoWire
         }
 
         return $reflection;
+    }
+
+    /**
+     * @param ReflectionMethod $reflectionConstructor
+     * @param string $class
+     * @param array $constructorParams
+     * @return array
+     * @throws AutowireException
+     * @throws ReflectionException
+     */
+    private function loadConstructorParams(ReflectionMethod $reflectionConstructor): array
+    {
+        $constructorParams = [];
+        $reflectionConstructorParams = $reflectionConstructor->getParameters();
+        // If there are no params then just return an empty array.
+        if (empty($reflectionConstructorParams)) return $constructorParams;
+
+        foreach ($reflectionConstructorParams as $reflectionConstructorParam) {
+            // We can autowire class dependencies by looking at their types
+            $paramTypeReflection = $reflectionConstructorParam->getType();
+
+            // If the constructor param has no type, we can't autowire it
+            if (!$paramTypeReflection) {
+                throw new AutowireException("Class '" .
+                    $reflectionConstructorParam->getDeclaringClass()->getName() .
+                    "' constructor param '" .
+                    $reflectionConstructorParam->getName() .
+                    "' missing type - unable to autowire");
+            }
+            // Create a reflection of the dependency
+            $paramReflection = $this->getReflection($paramTypeReflection->getName());
+            // Grab the dependencies constructor
+            $paramReflectionConstructor = $paramReflection->getConstructor();
+
+            // If the dependency has a constructor run it through autoWire()
+            // Otherwise create an instance directly
+            $constructorParams[] = $paramReflectionConstructor ? $this->autoWire($paramTypeReflection->getName()) : $paramReflection->newInstance();
+        }
+        return $constructorParams;
     }
 }
